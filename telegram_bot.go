@@ -192,19 +192,21 @@ func NewTelegramBot(token string) (*TelegramBot, error) {
                 log.Printf("Warning: Could not load database: %v", err)
         }
 
-        // Load saved positions from previous sessions
-        loadActivePositions()
-        
-        // Start file watcher for upbit_new.json
-        go botInstance.startFileWatcher()
-        
-        // Start position reminder system
-        go botInstance.startPositionReminders()
+	// Load saved positions from previous sessions
+	loadActivePositions()
+	
+	// OPTIMIZATION: File watcher DISABLED - using direct callback for 100-300ms faster execution
+	// The direct callback in main.go (line 19-22) is instant, file watching adds unnecessary delay
+	// go botInstance.startFileWatcher()
+	
+	// Start position reminder system
+	go botInstance.startPositionReminders()
 
-        // Start 4-hour status notifications
-        go botInstance.startStatusNotifications()
+	// Start 4-hour status notifications
+	go botInstance.startStatusNotifications()
 
-        return botInstance, nil
+	log.Printf("⚡ PERFORMANCE MODE: File watcher disabled, using instant callback for ultra-fast execution")
+	return botInstance, nil
 }
 
 // Save user database to JSON file (assumes caller has mutex lock)
@@ -509,22 +511,23 @@ func (tb *TelegramBot) executeAutoTrade(user *UserData, symbol string) {
         // Format symbol for Bitget (add USDT suffix)
         tradingSymbol := symbol + "USDT"
         
-        // Initialize Bitget API client
-        bitgetAPI := NewBitgetAPI(user.BitgetAPIKey, user.BitgetSecret, user.BitgetPasskey)
-        
-        // Pre-warm cache with fast timeout (3 seconds max)
-        log.Printf("🔄 Pre-warming balance cache for user %d...", user.UserID)
-        go func() {
-                if err := bitgetAPI.Cache.RefreshBalance(); err != nil {
-                        log.Printf("⚠️ Balance pre-warm failed for user %d: %v (will check during order)", user.UserID, err)
-                }
-        }()
-        
-        // Small delay to let pre-warm complete if fast
-        time.Sleep(200 * time.Millisecond)
-        
-        // Send notification to user
-        tb.sendMessage(user.UserID, fmt.Sprintf("🚀 Auto-trade triggered for %s\nMargin: %.2f USDT\nLeverage: %dx\nOpening long position...", tradingSymbol, user.MarginUSDT, user.Leverage))
+	// Initialize Bitget API client
+	bitgetAPI := NewBitgetAPI(user.BitgetAPIKey, user.BitgetSecret, user.BitgetPasskey)
+	
+	// OPTIMIZATION: Non-blocking balance pre-warm (no fixed delay!)
+	// Start pre-warm async, but don't block trade execution
+	log.Printf("🔄 Pre-warming balance cache for user %d (non-blocking)...", user.UserID)
+	go func() {
+		if err := bitgetAPI.Cache.RefreshBalance(); err != nil {
+			log.Printf("⚠️ Balance pre-warm failed for user %d: %v (will check during order)", user.UserID, err)
+		}
+	}()
+	
+	// REMOVED: 200ms fixed delay - balance check happens async during order execution
+	// This saves 200ms of fixed delay! Balance will be checked/refreshed if needed during OpenLongPosition
+	
+	// Send notification to user
+	tb.sendMessage(user.UserID, fmt.Sprintf("🚀 Auto-trade triggered for %s\nMargin: %.2f USDT\nLeverage: %dx\nOpening long position...", tradingSymbol, user.MarginUSDT, user.Leverage))
         
         // Record order sent timestamp
         orderSentAt := time.Now()
